@@ -26,6 +26,7 @@
 #include "ch.h"
 #include "hal.h"
 #include "spi_bb.h"
+#include "enc_ma600a.h"
 
 typedef enum {
 	ENCODER_TYPE_NONE = 0,
@@ -42,7 +43,8 @@ typedef enum {
 	ENCODER_TYPE_PWM,
 	ENCODER_TYPE_PWM_ABI,
 	ENCODER_TYPE_MA782,
-	ENCODER_TYPE_AMT22
+	ENCODER_TYPE_AMT22,
+	ENCODER_TYPE_MA600A
 } encoder_type_t;
 
 typedef struct {

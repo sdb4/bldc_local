@@ -24,6 +24,7 @@
 #include "encoder.h"
 #include "encoder_datatype.h"
 #include "encoder_cfg.h"
+#include "enc_ma600a.h"
 
 #include "utils.h"
 #include "utils_math.h"
@@ -35,6 +36,7 @@
 #include "app.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 // These rates turn into even multiples of systicks
@@ -56,6 +58,8 @@ static THD_FUNCTION(routine_thread, arg);
 static void terminal_encoder(int argc, const char **argv);
 static void terminal_encoder_clear_errors(int argc, const char **argv);
 static void terminal_encoder_clear_multiturn(int argc, const char **argv);
+static void terminal_ma600a_read_raw(int argc, const char **argv);
+static void terminal_ma600a_info(int argc, const char **argv);
 static void timer_start(routine_rate_t rate);
 
 // Function pointers
@@ -322,6 +326,19 @@ bool encoder_init(volatile mc_configuration *conf) {
 		res = true;
 	} break;
 
+	case SENSOR_PORT_MODE_MA600A: {
+		SENSOR_PORT_3V3();
+
+		if (!enc_ma600a_init(&encoder_cfg_ma600a)) {
+			return false;
+		}
+
+		m_encoder_type_now = ENCODER_TYPE_MA600A;
+		timer_start(routine_rate_10k);
+
+		res = true;
+	} break;
+
 	default:
 		SENSOR_PORT_5V();
 		m_encoder_type_now = ENCODER_TYPE_NONE;
@@ -345,6 +362,18 @@ bool encoder_init(volatile mc_configuration *conf) {
 			"Clear multiturn counter of the TS5700N8501 encoder.",
 			0,
 			terminal_encoder_clear_multiturn);
+
+	terminal_register_command_callback(
+			"ma600a_read_raw",
+			"Read raw 16-bit angle words from MA600A over SPI. Usage: ma600a_read_raw [count=8]",
+			"[count]",
+			terminal_ma600a_read_raw);
+
+	terminal_register_command_callback(
+			"ma600a_info",
+			"Read MA600A silicon ID, revision, zero offset, BCT, and registers 0-7.",
+			0,
+			terminal_ma600a_info);
 
 	return res;
 }
@@ -424,6 +453,8 @@ void encoder_deinit(void) {
 		enc_ma782_deinit(&encoder_cfg_ma782);
 	} else if (m_encoder_type_now == ENCODER_TYPE_AMT22) {
 		enc_amt22_deinit(&encoder_cfg_amt22);
+	} else if (m_encoder_type_now == ENCODER_TYPE_MA600A) {
+		enc_ma600a_deinit(&encoder_cfg_ma600a);
 	}
 
 	m_encoder_type_now = ENCODER_TYPE_NONE;
@@ -504,6 +535,10 @@ float encoder_read_deg(void) {
 
 	case ENCODER_TYPE_AMT22:
 		res = AMT22_LAST_ANGLE(&encoder_cfg_amt22);
+		break;
+
+	case ENCODER_TYPE_MA600A:
+		res = MA600A_LAST_ANGLE(&encoder_cfg_ma600a);
 		break;
 
 	case ENCODER_TYPE_CUSTOM:
@@ -645,6 +680,9 @@ float encoder_get_error_rate(void) {
 	case ENCODER_TYPE_AMT22:
 		res = encoder_cfg_amt22.state.spi_error_rate;
 		break;
+	case ENCODER_TYPE_MA600A:
+		res = encoder_cfg_ma600a.state.spi_error_rate;
+		break;
 	default:
 		break;
 	}
@@ -768,6 +806,12 @@ void encoder_check_faults(volatile mc_configuration *m_conf, bool is_second_moto
 			break;
 		case SENSOR_PORT_MODE_AMT22:
 			if (encoder_cfg_amt22.state.spi_error_rate > 0.05) {
+				mc_interface_fault_stop(FAULT_CODE_ENCODER_SPI, is_second_motor, false);
+			}
+			break;
+
+		case SENSOR_PORT_MODE_MA600A:
+			if (encoder_cfg_ma600a.state.spi_error_rate > 0.05) {
 				mc_interface_fault_stop(FAULT_CODE_ENCODER_SPI, is_second_motor, false);
 			}
 			break;
@@ -985,11 +1029,104 @@ static void terminal_encoder(int argc, const char **argv) {
 		commands_printf("Error cnt: %d", encoder_cfg_amt22.state.spi_error_cnt);
 		break;
 
+	case SENSOR_PORT_MODE_MA600A:
+		commands_printf("MA600A angle: %.2f deg, errors: %u, error rate: %.3f %% (%s)",
+				(double)encoder_cfg_ma600a.state.last_enc_angle,
+				(unsigned)encoder_cfg_ma600a.state.spi_error_cnt,
+				(double)(encoder_cfg_ma600a.state.spi_error_rate * 100.0),
+				(encoder_cfg_ma600a.spi_dev != NULL) ? "HW SPI" : "SW SPI");
+		break;
+
 	default:
 		commands_printf("No encoder debug info available.");
 		break;
 	}
 
+	commands_printf(" ");
+}
+
+static void terminal_ma600a_read_raw(int argc, const char **argv) {
+	if (m_encoder_type_now != ENCODER_TYPE_MA600A) {
+		commands_printf("MA600A not active (current encoder type: %d)", m_encoder_type_now);
+		return;
+	}
+
+	int count = 8;
+	if (argc >= 2) {
+		count = atoi(argv[1]);
+		if (count < 1 || count > 64) {
+			commands_printf("count must be 1-64");
+			return;
+		}
+	}
+
+	commands_printf("MA600A raw reads (%s):",
+			(encoder_cfg_ma600a.spi_dev != NULL) ? "HW SPI" : "SW SPI");
+
+	for (int i = 0; i < count; i++) {
+		uint16_t raw;
+		if (encoder_cfg_ma600a.spi_dev != NULL) {
+			spiAcquireBus(encoder_cfg_ma600a.spi_dev);
+			raw = MA600A_readAngleRaw16(&encoder_cfg_ma600a.device);
+			spiReleaseBus(encoder_cfg_ma600a.spi_dev);
+		} else {
+			raw = MA600A_readAngleRaw16(&encoder_cfg_ma600a.device);
+		}
+		commands_printf("  [%2d] 0x%04X  %.2f deg", i, raw, (double)(raw * (360.0f / 65536.0f)));
+		chThdSleepMilliseconds(2);
+	}
+	commands_printf(" ");
+}
+
+static void terminal_ma600a_info(int argc, const char **argv) {
+	(void)argc; (void)argv;
+
+	if (m_encoder_type_now != ENCODER_TYPE_MA600A) {
+		commands_printf("MA600A not active (current encoder type: %d)", m_encoder_type_now);
+		return;
+	}
+
+	MA600A_Device *dev = &encoder_cfg_ma600a.device;
+	bool hw = (encoder_cfg_ma600a.spi_dev != NULL);
+
+	if (hw) spiAcquireBus(encoder_cfg_ma600a.spi_dev);
+
+	uint8_t  sil_id  = MA600A_getSiliconId(dev);
+	uint8_t  sil_rev = MA600A_getSiliconRevision(dev);
+	uint8_t  reg_rev = MA600A_getRegisterMapRevision(dev);
+	uint16_t zero    = MA600A_getZero(dev);
+	uint16_t bct     = MA600A_getBct(dev);
+
+	if (hw) spiReleaseBus(encoder_cfg_ma600a.spi_dev);
+
+	commands_printf("MA600A info (%s):", hw ? "HW SPI" : "SW SPI");
+	commands_printf("  Silicon ID       : 0x%02X (%s)", sil_id,
+			(sil_id == 0x00 || sil_id == 0xFF) ? "INVALID - check wiring/power" : "ok");
+	commands_printf("  Silicon revision : 0x%02X", sil_rev);
+	commands_printf("  Reg-map revision : 0x%02X", reg_rev);
+	commands_printf("  Zero offset      : 0x%04X (%.2f deg)", zero,
+			(double)(zero * (360.0f / 65536.0f)));
+	commands_printf("  BCT              : 0x%04X", bct);
+
+	commands_printf("  Registers 0-7:");
+	if (hw) spiAcquireBus(encoder_cfg_ma600a.spi_dev);
+	for (int r = 0; r <= 7; r++) {
+		uint8_t val = MA600A_readRegister(dev, (uint8_t)r);
+		commands_printf("    reg[%d] = 0x%02X", r, val);
+	}
+	if (hw) spiReleaseBus(encoder_cfg_ma600a.spi_dev);
+
+	// Raw angle for reference
+	uint16_t raw;
+	if (hw) {
+		spiAcquireBus(encoder_cfg_ma600a.spi_dev);
+		raw = MA600A_readAngleRaw16(dev);
+		spiReleaseBus(encoder_cfg_ma600a.spi_dev);
+	} else {
+		raw = MA600A_readAngleRaw16(dev);
+	}
+	commands_printf("  Raw angle now    : 0x%04X  %.2f deg", raw,
+			(double)(raw * (360.0f / 65536.0f)));
 	commands_printf(" ");
 }
 
@@ -1041,6 +1178,10 @@ static THD_FUNCTION(routine_thread, arg) {
 
 		case ENCODER_TYPE_AMT22:
 			enc_amt22_routine(&encoder_cfg_amt22);
+			break;
+
+		case ENCODER_TYPE_MA600A:
+			enc_ma600a_routine(&encoder_cfg_ma600a);
 			break;
 
 		default:

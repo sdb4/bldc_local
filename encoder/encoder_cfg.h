@@ -34,5 +34,6 @@ extern TLE5012_config_t encoder_cfg_tle5012;
 extern TS5700N8501_config_t encoder_cfg_TS5700N8501;
 extern ma782_config_t encoder_cfg_ma782;
 extern AMT22_config_t encoder_cfg_amt22;
+extern MA600A_config_t encoder_cfg_ma600a;
 
 #endif /* ENCODER_CFG_H_ */

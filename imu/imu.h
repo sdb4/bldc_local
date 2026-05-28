@@ -32,6 +32,12 @@ void imu_init_mpu9x50(stm32_gpio_t *sda_gpio, int sda_pin,
 		stm32_gpio_t *scl_gpio, int scl_pin);
 void imu_init_icm20948(stm32_gpio_t *sda_gpio, int sda_pin,
 		stm32_gpio_t *scl_gpio, int scl_pin, int ad0_val);
+void imu_init_icm45686_i2c(stm32_gpio_t *sda_gpio, int sda_pin,
+		stm32_gpio_t *scl_gpio, int scl_pin, int ad0_val);
+void imu_init_icm45686_spi(stm32_gpio_t *nss_gpio, int nss_pin,
+		stm32_gpio_t *sck_gpio, int sck_pin,
+		stm32_gpio_t *mosi_gpio, int mosi_pin,
+		stm32_gpio_t *miso_gpio, int miso_pin);
 void imu_init_bmi160_i2c(stm32_gpio_t *sda_gpio, int sda_pin,
 		stm32_gpio_t *scl_gpio, int scl_pin);
 void imu_init_lsm6ds3(stm32_gpio_t *sda_gpio, int sda_pin,

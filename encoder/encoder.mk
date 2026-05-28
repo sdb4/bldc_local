@@ -11,6 +11,9 @@ ENCSRC =	encoder/encoder.c \
 			encoder/enc_ts5700n8501.c \
 			encoder/enc_pwm.c \
 			encoder/enc_ma782.c \
-			encoder/enc_amt22.c
+			encoder/enc_amt22.c \
+			encoder/ma600a_driver/ma600a.c \
+			encoder/enc_ma600a.c
 
-ENCINC =	encoder
+ENCINC =	encoder \
+			encoder/ma600a_driver

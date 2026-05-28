@@ -25,6 +25,7 @@
 #include "terminal.h"
 #include "commands.h"
 #include "icm20948.h"
+#include "icm45686_wrapper.h"
 #include "bmi160_wrapper.h"
 #include "lsm6ds3.h"
 #include "utils_math.h"
@@ -42,6 +43,7 @@ static stkalign_t m_thd_work_area[THD_WORKING_AREA_SIZE(1024) / sizeof(stkalign_
 static i2c_bb_state m_i2c_bb;
 static spi_bb_state m_spi_bb;
 static ICM20948_STATE m_icm20948_state;
+static ICM45686_STATE m_icm45686_state;
 static BMI_STATE m_bmi_state;
 static imu_config m_settings;
 static systime_t init_time;
@@ -122,6 +124,7 @@ void imu_init(imu_config *set) {
 	mpu9150_set_mag_enabled(set->use_magnetometer);
 	mpu9150_set_rate_hz(MIN(set->sample_rate_hz, 1000));
 	m_icm20948_state.rate_hz = MIN(set->sample_rate_hz, 1000);
+	m_icm45686_state.rate_hz = MIN(set->sample_rate_hz, 1000);
 	m_bmi_state.rate_hz = set->sample_rate_hz;
 	lsm6ds3_set_rate_hz(set->sample_rate_hz);
 
@@ -139,6 +142,12 @@ void imu_init(imu_config *set) {
 		imu_init_icm20948(ICM20948_SDA_GPIO, ICM20948_SDA_PIN,
 				ICM20948_SCL_GPIO, ICM20948_SCL_PIN, ICM20948_AD0_VAL);
 		m_imu_type_internal = "ICM20948";
+#endif
+
+#ifdef ICM45686_SDA_GPIO
+		imu_init_icm45686_i2c(ICM45686_SDA_GPIO, ICM45686_SDA_PIN,
+				ICM45686_SCL_GPIO, ICM45686_SCL_PIN, ICM45686_AD0_VAL);
+		m_imu_type_internal = "ICM45686";
 #endif
 
 #ifdef BMI160_SDA_GPIO
@@ -186,6 +195,15 @@ void imu_init(imu_config *set) {
 				BMI160_SPI_PORT_MISO, BMI160_SPI_PIN_MISO);
 		m_imu_type_internal = "BMI160_SPI";
 #endif
+
+#ifdef ICM45686_SPI_PORT_NSS
+		imu_init_icm45686_spi(
+				ICM45686_SPI_PORT_NSS, ICM45686_SPI_PIN_NSS,
+				ICM45686_SPI_PORT_SCK, ICM45686_SPI_PIN_SCK,
+				ICM45686_SPI_PORT_MOSI, ICM45686_SPI_PIN_MOSI,
+				ICM45686_SPI_PORT_MISO, ICM45686_SPI_PIN_MISO);
+		m_imu_type_internal = "ICM45686_SPI";
+#endif
 	} else if (set->type == IMU_TYPE_EXTERNAL_MPU9X50) {
 		imu_init_mpu9x50(HW_I2C_SDA_PORT, HW_I2C_SDA_PIN,
 				HW_I2C_SCL_PORT, HW_I2C_SCL_PIN);
@@ -201,6 +219,9 @@ void imu_init(imu_config *set) {
 	} else if (set->type == IMU_TYPE_EXTERNAL_BMI160) {
 		imu_init_bmi160_i2c(HW_I2C_SDA_PORT, HW_I2C_SDA_PIN,
 				HW_I2C_SCL_PORT, HW_I2C_SCL_PIN);
+	} else if (set->type == IMU_TYPE_EXTERNAL_ICM45686) {
+		imu_init_icm45686_i2c(HW_I2C_SDA_PORT, HW_I2C_SDA_PIN,
+				HW_I2C_SCL_PORT, HW_I2C_SCL_PIN, 0);
 	}
 
 	terminal_register_command_callback(
@@ -247,6 +268,44 @@ void imu_init_icm20948(stm32_gpio_t *sda_gpio, int sda_pin,
 			&m_i2c_bb, ad0_val,
 			m_thd_work_area, sizeof(m_thd_work_area));
 	icm20948_set_read_callback(&m_icm20948_state, imu_read_callback);
+}
+
+void imu_init_icm45686_i2c(stm32_gpio_t *sda_gpio, int sda_pin,
+		stm32_gpio_t *scl_gpio, int scl_pin, int ad0_val) {
+	imu_stop();
+
+	m_i2c_bb.sda_gpio = sda_gpio;
+	m_i2c_bb.sda_pin = sda_pin;
+	m_i2c_bb.scl_gpio = scl_gpio;
+	m_i2c_bb.scl_pin = scl_pin;
+	m_i2c_bb.rate = I2C_BB_RATE_400K;
+	i2c_bb_init(&m_i2c_bb);
+
+	icm45686_init(&m_icm45686_state,
+			&m_i2c_bb, NULL, ad0_val,
+			m_thd_work_area, sizeof(m_thd_work_area));
+	icm45686_set_read_callback(&m_icm45686_state, imu_read_callback);
+}
+
+void imu_init_icm45686_spi(stm32_gpio_t *nss_gpio, int nss_pin,
+		stm32_gpio_t *sck_gpio, int sck_pin, stm32_gpio_t *mosi_gpio, int mosi_pin,
+		stm32_gpio_t *miso_gpio, int miso_pin) {
+	imu_stop();
+
+	m_spi_bb.nss_gpio = nss_gpio;
+	m_spi_bb.nss_pin = nss_pin;
+	m_spi_bb.sck_gpio = sck_gpio;
+	m_spi_bb.sck_pin = sck_pin;
+	m_spi_bb.mosi_gpio = mosi_gpio;
+	m_spi_bb.mosi_pin = mosi_pin;
+	m_spi_bb.miso_gpio = miso_gpio;
+	m_spi_bb.miso_pin = miso_pin;
+	spi_bb_init(&m_spi_bb);
+
+	icm45686_init(&m_icm45686_state,
+			NULL, &m_spi_bb, 0,
+			m_thd_work_area, sizeof(m_thd_work_area));
+	icm45686_set_read_callback(&m_icm45686_state, imu_read_callback);
 }
 
 void imu_init_bmi160_i2c(stm32_gpio_t *sda_gpio, int sda_pin,
@@ -354,6 +413,7 @@ void imu_init_lsm6ds3_spi(stm32_gpio_t *nss_gpio, int nss_pin,
 void imu_stop(void) {
 	mpu9150_stop();
 	icm20948_stop(&m_icm20948_state);
+	icm45686_stop(&m_icm45686_state);
 	bmi160_wrapper_stop(&m_bmi_state);
 	lsm6ds3_stop();
 

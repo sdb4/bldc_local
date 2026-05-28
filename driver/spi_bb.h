@@ -38,6 +38,13 @@ typedef struct {
 	bool mutex_init_done;
 } spi_bb_state;
 
+// Zero-initialiser for mutex_t
+#define MUTEX_ZERO  {{NULL, NULL}, NULL, NULL}
+
+// Zero-initialiser for spi_bb_state (includes mutex_init_done = false)
+#define SPI_BB_STATE_ZERO \
+	{NULL, 0, NULL, 0, NULL, 0, NULL, 0, MUTEX_ZERO, false}
+
 void spi_bb_init(spi_bb_state *s);
 void spi_bb_deinit(spi_bb_state *s);
 void ssc_bb_init(spi_bb_state *s);

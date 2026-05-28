@@ -249,3 +249,45 @@ AMT22_config_t encoder_cfg_amt22 = {
 
 		{0} // State
 };
+
+// MA600A encoder configuration.
+// Transport is selected at compile time by the hwconf:
+//   #define MA600A_USE_HW_SPI  → hardware SPI via HW_SPI_DEV / HW_SPI_PORT_* macros
+//   (no define)                → software bit-bang SPI on Hall connector pins (default)
+MA600A_config_t encoder_cfg_ma600a = {
+#if defined(MA600A_USE_HW_SPI) && defined(HW_SPI_DEV)
+		// ---- Hardware SPI ----
+		&HW_SPI_DEV,
+		{// SPI Mode 3 (CPOL=1, CPHA=1), 8-bit frames
+				NULL, HW_SPI_PORT_NSS, HW_SPI_PIN_NSS,
+				SPI_BaudRatePrescaler_8 | SPI_CR1_CPOL | SPI_CR1_CPHA | SPI_DATASIZE_8BIT
+		},
+		HW_SPI_GPIO_AF,
+		/*NSS*/ HW_SPI_PORT_NSS,  HW_SPI_PIN_NSS,
+		/*SCK*/ HW_SPI_PORT_SCK,  HW_SPI_PIN_SCK,
+		/*MOSI*/HW_SPI_PORT_MOSI, HW_SPI_PIN_MOSI,
+		/*MISO*/HW_SPI_PORT_MISO, HW_SPI_PIN_MISO,
+		SPI_BB_STATE_ZERO, // sw_spi unused in HW SPI mode
+#else
+		// ---- Software bit-bang SPI (default) ----
+		// spi_dev = NULL signals SW mode to enc_ma600a_init
+		NULL, {0}, 0,            // spi_dev, hw_spi_cfg, spi_af (unused)
+		NULL, 0,                 // nss_gpio/pin (unused — sw_spi drives CS)
+		NULL, 0,                 // sck_gpio/pin (unused)
+		NULL, 0,                 // mosi_gpio/pin (unused)
+		NULL, 0,                 // miso_gpio/pin (unused)
+		{      // sw_spi: spi_bb_state
+				HW_HALL_ENC_GPIO3, HW_HALL_ENC_PIN3, // NSS (HALL3)
+				HW_HALL_ENC_GPIO1, HW_HALL_ENC_PIN1, // SCK (HALL1)
+#ifdef MA600A_MOSI_GPIO
+				MA600A_MOSI_GPIO, MA600A_MOSI_PIN,
+#else
+				NULL, 0,
+#endif // MA600A_MOSI_GPIO
+				HW_HALL_ENC_GPIO2, HW_HALL_ENC_PIN2, // MISO (HALL2)
+				MUTEX_ZERO, false
+		},
+#endif
+		{0},
+		{0,0,0,0},
+};
