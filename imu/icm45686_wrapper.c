@@ -381,11 +381,10 @@ static bool reset_init_icm(ICM45686_STATE *s) {
 		i2c_bb_restore_bus(s->i2cs);
 	}
 
-	chThdSleep(1);
+	chThdSleepMilliseconds(1);
 
-	int rc = 0;
-
-	rc |= inv_imu_adv_init(&s->icm_driver);
+	int rc = inv_imu_adv_init(&s->icm_driver);
+	if (rc != INV_IMU_OK) return false;
 
 	sleep_us(3000);
 
@@ -398,6 +397,20 @@ static bool reset_init_icm(ICM45686_STATE *s) {
 	rc |= inv_imu_set_gyro_fsr(&s->icm_driver, gyro_fsr_dps_to_param(ICM45686_GYRO_FSR));
 	rc |= inv_imu_set_gyro_frequency(&s->icm_driver, gyro_freq_to_param(s->rate_hz));
 	rc |= inv_imu_set_gyro_mode(&s->icm_driver, PWR_MGMT0_GYRO_MODE_LN);
+
+	// Wait for PLL (MCLK) to be ready before accessing MREG registers.
+	// IPREG_SYS1/SYS2 require MCLK; accessing them while the PLL is still
+	// starting up stalls the ICM I2C bus, triggering clock_stretch_timeout
+	// and breaking all subsequent reads.  PLL is typically ready ~10 ms after
+	// LN mode is enabled on a cold start.
+	{
+		int1_status1_t st1 = {0};
+		for (int i = 0; i < 100; i++) {
+			sleep_us(1000);
+			inv_imu_read_reg(&s->icm_driver, INT1_STATUS1, 1, (uint8_t *)&st1);
+			if (st1.int1_status_pll_rdy) break;
+		}
+	}
 
 	// Enable FIR filter + interpolator for accel and gyro (low-noise signal chain)
 	ipreg_sys2_reg_123_t ipreg_sys2_reg_123;
