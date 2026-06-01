@@ -1,5 +1,6 @@
 /*
-	Copyright 2026 Optroxa
+	Copyright 2026 Benjamin Vedder	benjamin@vedder.se
+	Created in 2026 by Samuel de Boer
 
 	This file is part of the VESC firmware.
 
@@ -15,7 +16,7 @@
 
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
- */
+    */
 
 #include "enc_ma600a.h"
 #include "spi_bb.h"
