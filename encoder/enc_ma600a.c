@@ -148,7 +148,7 @@ static void terminal_ma600a_info(int argc, const char **argv) {
 
     commands_printf("MA600A info (%s):", hw ? "HW SPI" : "SW SPI");
     commands_printf("  Silicon ID       : 0x%02X (%s)", sil_id,
-            (sil_id == 0x00 || sil_id == 0xFF) ? "INVALID - check wiring/power" : "ok");
+            (sil_id == 0xFF) ? "INVALID - check wiring/power" : "ok");
     commands_printf("  Silicon revision : 0x%02X", sil_rev);
     commands_printf("  Reg-map revision : 0x%02X", reg_rev);
     commands_printf("  Zero offset      : 0x%04X (%.2f deg)", zero,
