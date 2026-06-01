@@ -1,6 +1,6 @@
 /*
 	Copyright 2026 Benjamin Vedder	benjamin@vedder.se
-	Created in 2026 by Samuel de Boer
+	Written in 2026 by Samuel de Boer  sdb@pendrum.com
 
 	This file is part of the VESC firmware.
 
