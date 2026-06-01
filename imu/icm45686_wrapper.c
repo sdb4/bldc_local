@@ -226,11 +226,9 @@ static gyro_config0_gyro_odr_t gyro_freq_to_param(uint16_t gyro_freq_hz) {
   return ret;
 }
 
-static void opx_debug_imu_read(int argc, const char **argv) {
+static void icm45686_terminal_read(int argc, const char **argv) {
 	(void)argv;
 	if (argc == 1) {
-		commands_printf("READING IMU");
-
 		inv_imu_sensor_data_t imu_data;
 		int res = inv_imu_get_register_data(&m_terminal_state->icm_driver, &imu_data);
 
@@ -247,54 +245,44 @@ static void opx_debug_imu_read(int argc, const char **argv) {
 
 			commands_printf("%f %f %f %f %f %f", (double)accel[0], (double)accel[1], (double)accel[2], (double)gyro[0], (double)gyro[1], (double)gyro[2]);
 		} else {
-			commands_printf("BAD DATA");
+			commands_printf("Bad result when reading from IMU");
 		}
 	}
 }
 
-static void opx_debug_imu_whoami(int argc, const char **argv) {
+static void icm45686_terminal_whoami(int argc, const char **argv) {
 	(void)argv;
 	if (argc == 1) {
-		ICM45686_STATE *s = m_terminal_state;
-		int rc = 0;
-
-		/* Read and check whoami */
 		uint8_t whoami;
-		rc |= inv_imu_get_who_am_i(&s->icm_driver, &whoami);
-		commands_printf("WHOAMI %ul", whoami);
+		inv_imu_get_who_am_i(&m_terminal_state->icm_driver, &whoami);
+		commands_printf("WHO_AM_I: 0x%02x", whoami);
 	}
 }
 
-static void opx_debug_imu_read_reg(int argc, const char **argv) {
+static void icm45686_terminal_read_reg(int argc, const char **argv) {
 	if (argc == 2) {
-		ICM45686_STATE *s = m_terminal_state;
-		int rc = 0;
-
 		unsigned int reg = 0;
-		sscanf(argv[1], "%ul", &reg);
+		sscanf(argv[1], "%u", &reg);
 
-		uint8_t res;
-		rc = inv_imu_read_reg(s, reg, 1, &res);
-		commands_printf("REG: %u, STAT: %u, RES: %u", reg, rc, res);
+		uint8_t val;
+		int rc = inv_imu_read_reg(&m_terminal_state->icm_driver, reg, 1, &val);
 
 		char bl[9];
-		//write_single_reg(m_terminal_state, ICM45686_BANK_SEL, 0 << 4);
-		utils_byte_to_binary(res & 0xFF, bl);
-		commands_printf("Reg 0x%02x: %s (0x%02x)\n", reg, bl, res);
+		utils_byte_to_binary(val & 0xFF, bl);
+		commands_printf("Reg 0x%02x: %s (0x%02x) rc=%d", reg, bl, val, rc);
 	}
 }
-static void opx_debug_imu_write_reg(int argc, const char **argv) {
-	if (argc == 3) {
-		ICM45686_STATE *s = m_terminal_state;
-		int rc = 0;
 
+static void icm45686_terminal_write_reg(int argc, const char **argv) {
+	if (argc == 3) {
 		unsigned int reg = 0;
 		unsigned int val = 0;
-		sscanf(argv[1], "%ul", &reg);
-		sscanf(argv[2], "%ul", &val);
+		sscanf(argv[1], "%u", &reg);
+		sscanf(argv[2], "%u", &val);
 
-		rc = inv_imu_write_reg(s, reg, 1, (uint8_t *)&val);
-		commands_printf("REG: %u, STAT: %u, VAL: %u", reg, rc, val);
+		uint8_t v = (uint8_t)val;
+		int rc = inv_imu_write_reg(&m_terminal_state->icm_driver, reg, 1, &v);
+		commands_printf("Reg 0x%02x := 0x%02x rc=%d", reg, v, rc);
 	}
 }
 
@@ -330,7 +318,6 @@ void icm45686_init(ICM45686_STATE *s, i2c_bb_state *i2c_state, spi_bb_state *spi
 		s->should_stop = false;
 		chThdCreateStatic(work_area, work_area_size, NORMALPRIO+1, icm_thread, s);
 	} else {
-		commands_printf("INIT FAIL");
 		return;
 	}
 
@@ -339,27 +326,28 @@ void icm45686_init(ICM45686_STATE *s, i2c_bb_state *i2c_state, spi_bb_state *spi
 		m_terminal_state = s;
 
 		terminal_register_command_callback(
-				"opx_debug_imu_read",
-				"Print internal IMU type",
+				"icm45686_read",
+				"Read one sample of accel (g) and gyro (deg/s) from the ICM-45686.",
 				0,
-				opx_debug_imu_read);
+				icm45686_terminal_read);
 
 		terminal_register_command_callback(
-				"opx_debug_imu_whoami",
-				"Print internal IMU type",
+				"icm45686_whoami",
+				"Read WHO_AM_I register of the ICM-45686.",
 				0,
-				opx_debug_imu_whoami);
+				icm45686_terminal_whoami);
 
 		terminal_register_command_callback(
-				"opx_debug_imu_read_reg",
-				"Print internal IMU type",
-				0,
-				opx_debug_imu_read_reg);
+				"icm45686_read_reg",
+				"Read a register of the ICM-45686.",
+				"[reg]",
+				icm45686_terminal_read_reg);
+
 		terminal_register_command_callback(
-				"opx_debug_imu_write_reg",
-				"Print internal IMU type",
-				0,
-				opx_debug_imu_write_reg);
+				"icm45686_write_reg",
+				"Write a register of the ICM-45686.",
+				"[reg] [val]",
+				icm45686_terminal_write_reg);
 	}
 }
 
@@ -374,7 +362,10 @@ void icm45686_stop(ICM45686_STATE *s) {
 	}
 
 	if (s == m_terminal_state) {
-//		terminal_unregister_callback(terminal_read_reg);
+		terminal_unregister_callback(icm45686_terminal_read);
+		terminal_unregister_callback(icm45686_terminal_whoami);
+		terminal_unregister_callback(icm45686_terminal_read_reg);
+		terminal_unregister_callback(icm45686_terminal_write_reg);
 		m_terminal_state = 0;
 	}
 }

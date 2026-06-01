@@ -26,8 +26,11 @@
 #include "stm32f4xx_conf.h"
 #include "hw.h"
 #include "timer.h"
+#include "terminal.h"
+#include "commands.h"
 #include "utils_math.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 // Module-level pointer to the active config for use by SPI callbacks.
@@ -94,6 +97,86 @@ static void ma600a_delay_ms(uint32_t ms) {
 }
 
 /*====================================================================================*/
+/* Terminal commands                                                                  */
+/*====================================================================================*/
+
+static void terminal_ma600a_read_raw(int argc, const char **argv) {
+    int count = 8;
+    if (argc >= 2) {
+        count = atoi(argv[1]);
+        if (count < 1 || count > 64) {
+            commands_printf("count must be 1-64");
+            return;
+        }
+    }
+
+    MA600A_config_t *cfg = s_cfg;
+    bool hw = (cfg->spi_dev != NULL);
+
+    commands_printf("MA600A raw reads (%s):", hw ? "HW SPI" : "SW SPI");
+
+    for (int i = 0; i < count; i++) {
+        uint16_t raw;
+        if (hw) {
+            spiAcquireBus(cfg->spi_dev);
+            raw = MA600A_readAngleRaw16(&cfg->device);
+            spiReleaseBus(cfg->spi_dev);
+        } else {
+            raw = MA600A_readAngleRaw16(&cfg->device);
+        }
+        commands_printf("  [%2d] 0x%04X  %.2f deg", i, raw, (double)(raw * (360.0f / 65536.0f)));
+        chThdSleepMilliseconds(2);
+    }
+    commands_printf(" ");
+}
+
+static void terminal_ma600a_info(int argc, const char **argv) {
+    (void)argc; (void)argv;
+
+    MA600A_config_t *cfg = s_cfg;
+    bool hw = (cfg->spi_dev != NULL);
+
+    if (hw) spiAcquireBus(cfg->spi_dev);
+
+    uint8_t  sil_id  = MA600A_getSiliconId(&cfg->device);
+    uint8_t  sil_rev = MA600A_getSiliconRevision(&cfg->device);
+    uint8_t  reg_rev = MA600A_getRegisterMapRevision(&cfg->device);
+    uint16_t zero    = MA600A_getZero(&cfg->device);
+    uint16_t bct     = MA600A_getBct(&cfg->device);
+
+    if (hw) spiReleaseBus(cfg->spi_dev);
+
+    commands_printf("MA600A info (%s):", hw ? "HW SPI" : "SW SPI");
+    commands_printf("  Silicon ID       : 0x%02X (%s)", sil_id,
+            (sil_id == 0x00 || sil_id == 0xFF) ? "INVALID - check wiring/power" : "ok");
+    commands_printf("  Silicon revision : 0x%02X", sil_rev);
+    commands_printf("  Reg-map revision : 0x%02X", reg_rev);
+    commands_printf("  Zero offset      : 0x%04X (%.2f deg)", zero,
+            (double)(zero * (360.0f / 65536.0f)));
+    commands_printf("  BCT              : 0x%04X", bct);
+
+    commands_printf("  Registers 0-7:");
+    if (hw) spiAcquireBus(cfg->spi_dev);
+    for (int r = 0; r <= 7; r++) {
+        uint8_t val = MA600A_readRegister(&cfg->device, (uint8_t)r);
+        commands_printf("    reg[%d] = 0x%02X", r, val);
+    }
+    if (hw) spiReleaseBus(cfg->spi_dev);
+
+    uint16_t raw;
+    if (hw) {
+        spiAcquireBus(cfg->spi_dev);
+        raw = MA600A_readAngleRaw16(&cfg->device);
+        spiReleaseBus(cfg->spi_dev);
+    } else {
+        raw = MA600A_readAngleRaw16(&cfg->device);
+    }
+    commands_printf("  Raw angle now    : 0x%04X  %.2f deg", raw,
+            (double)(raw * (360.0f / 65536.0f)));
+    commands_printf(" ");
+}
+
+/*====================================================================================*/
 /* Public API                                                                         */
 /*====================================================================================*/
 
@@ -140,6 +223,18 @@ bool enc_ma600a_init(MA600A_config_t *cfg) {
     // csPin=0: the csPin argument is unused; CS is driven via the callbacks above
     MA600A_init(&cfg->device, 0, iface);
 
+    terminal_register_command_callback(
+            "ma600a_read_raw",
+            "Read raw 16-bit angle words from the MA600A.",
+            "[count]",
+            terminal_ma600a_read_raw);
+
+    terminal_register_command_callback(
+            "ma600a_info",
+            "Read MA600A silicon ID, revision, zero offset, BCT, and registers 0-7.",
+            0,
+            terminal_ma600a_info);
+
     return true;
 }
 
@@ -147,6 +242,9 @@ void enc_ma600a_deinit(MA600A_config_t *cfg) {
     if (cfg->spi_dev == NULL && cfg->sw_spi.sck_gpio == NULL) {
         return;
     }
+
+    terminal_unregister_callback(terminal_ma600a_read_raw);
+    terminal_unregister_callback(terminal_ma600a_info);
 
     MA600A_deinit(&cfg->device);
 
